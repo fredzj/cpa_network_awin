@@ -1,0 +1,11 @@
+# Local configuration with secrets (API token, DB password) — use config.sample.php as template
+config.php
+
+# Runtime output
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
