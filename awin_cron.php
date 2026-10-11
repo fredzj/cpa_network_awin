@@ -10,12 +10,16 @@
  *   awin_promotions          POST /publisher/{id}/promotions
  *   awin_transactions        GET  /publishers/{id}/transactions/
  *   awin_report_rows         GET  /publishers/{id}/reports/{advertiser|creative|campaign}
+ * Per feed list URL in config (product_feed_lists):
+ *   awin_feeds               the feed list (CSV)
+ *   awin_products            products of the feeds you are joined to (CSV.gz per feed; only re-imported when AWIN refreshed it)
  *
  * Usage:
  *   php awin_cron.php                                  normal run (lookback window from config)
  *   php awin_cron.php --from=2024-01-01 --to=2024-12-31  backfill transactions + reports
- *   php awin_cron.php --only=transactions,reports      run selected parts (static, transactions, reports)
+ *   php awin_cron.php --only=transactions,reports      run selected parts (static, transactions, reports, products)
  *   php awin_cron.php --force-static                   ignore static_refresh_hours
+ *   php awin_cron.php --only=products --force-products  re-import every product feed, changed or not
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -30,6 +34,7 @@ date_default_timezone_set('UTC');
 const API_BASE = 'https://api.awin.com';
 const REPORT_REGIONS = ['AT', 'AU', 'BE', 'BR', 'BU', 'CA', 'CH', 'DE', 'DK', 'ES', 'FI', 'FR', 'GB', 'IE', 'IT', 'NL', 'NO', 'PL', 'SE', 'US'];
 const TRANSACTION_MAX_DAYS = 31;
+const PRODUCT_BATCH = 500;
 
 $configFile = __DIR__ . '/config.php';
 if (!is_file($configFile)) {
@@ -38,9 +43,10 @@ if (!is_file($configFile)) {
 }
 $cfg = require $configFile;
 
-$opts = getopt('', ['from:', 'to:', 'only:', 'force-static']);
-$parts = isset($opts['only']) ? array_map('trim', explode(',', $opts['only'])) : ['static', 'transactions', 'reports'];
+$opts = getopt('', ['from:', 'to:', 'only:', 'force-static', 'force-products']);
+$parts = isset($opts['only']) ? array_map('trim', explode(',', $opts['only'])) : ['static', 'transactions', 'reports', 'products'];
 $forceStatic = isset($opts['force-static']);
+$forceProducts = isset($opts['force-products']);
 
 @mkdir($cfg['log_dir'], 0750, true);
 if (!is_file($cfg['log_dir'] . '/.htaccess')) {
@@ -62,8 +68,11 @@ try {
     $db->migrate(__DIR__ . '/schema.sql');
     $api = new AwinClient($cfg['api_token'], (int)$cfg['max_calls_per_minute']);
 
-    $publishers = resolvePublishers($api, $db, $cfg);
-    logMsg('Publishers: ' . implode(', ', array_map(fn($id, $n) => "$id ($n)", array_keys($publishers), $publishers)));
+    $apiParts = array_intersect($parts, ['static', 'transactions', 'reports']);
+    $publishers = $apiParts ? resolvePublishers($api, $db, $cfg) : [];
+    if ($publishers) {
+        logMsg('Publishers: ' . implode(', ', array_map(fn($id, $n) => "$id ($n)", array_keys($publishers), $publishers)));
+    }
 
     foreach ($publishers as $pid => $name) {
         logMsg("=== Publisher $pid ($name) ===");
@@ -86,6 +95,10 @@ try {
         } catch (Throwable $e) {
             logMsg("ERROR publisher $pid: " . $e->getMessage());
         }
+    }
+
+    if (in_array('products', $parts, true)) {
+        syncProductFeeds($db, $cfg, $forceProducts);
     }
     logMsg("Done. API calls: {$api->calls}");
 } catch (AwinAuthException $e) {
@@ -377,6 +390,281 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
     logMsg("reports {$from->format('Y-m-d')}..{$to->format('Y-m-d')} [" . implode(',', $regions) . "]: $count rows");
 }
 
+/* ------------------------------------------------------------------ product feeds */
+
+/**
+ * Downloads each feed list from config, saves it to awin_feeds and imports the products of the selected feeds
+ * (membership in product_feed_membership, not in product_feed_exclude). A feed is only re-imported when its
+ * "Last Imported" date in the feed list changed. Products of feeds that are no longer selected are removed.
+ */
+function syncProductFeeds(Db $db, array $cfg, bool $force): void
+{
+    global $runStart;
+    $lists = $cfg['product_feed_lists'] ?? [];
+    if (!$lists) {
+        logMsg('No product_feed_lists in config, skipping products.');
+        return;
+    }
+    $membership = array_map('strtolower', $cfg['product_feed_membership'] ?? ['active']);
+    $exclude = array_map('strval', $cfg['product_feed_exclude'] ?? []);
+    $tmpDir = $cfg['log_dir'] . '/feed-tmp';
+    @mkdir($tmpDir, 0750, true);
+
+    foreach ($lists as $listUrl) {
+        if (!preg_match('~/publisher/(\d+)/~', $listUrl, $m)) {
+            logMsg('skip feed list: no publisher ID in URL');
+            continue;
+        }
+        $pid = (int)$m[1];
+        logMsg("=== Product feeds publisher $pid ===");
+        try {
+            $file = "$tmpDir/feedlist-$pid.csv";
+            download($listUrl, $file);
+            $feeds = readFeedList($file);
+            @unlink($file);
+        } catch (Throwable $e) {
+            logMsg("ERROR feed list $pid: " . $e->getMessage());
+            continue;
+        }
+
+        $selected = [];
+        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, &$selected, $runStart) {
+            foreach ($feeds as $f) {
+                $fid = (string)$f['Feed ID'];
+                $db->upsert('awin_feeds', [
+                    'publisher_id' => $pid,
+                    'feed_id' => str($fid, 20),
+                    'advertiser_id' => is_numeric($f['Advertiser ID'] ?? null) ? (int)$f['Advertiser ID'] : null,
+                    'advertiser_name' => str($f['Advertiser Name'] ?? null, 255),
+                    'primary_region' => str($f['Primary Region'] ?? null, 2),
+                    'membership_status' => str($f['Membership Status'] ?? null, 20),
+                    'feed_format' => str($f['Datafeed Format'] ?? null, 20),
+                    'feed_name' => str($f['Feed Name'] ?? null, 255),
+                    'language' => str($f['Language'] ?? null, 50),
+                    'vertical' => str($f['Vertical'] ?? null, 100),
+                    'awin_imported_at' => dt($f['Last Imported'] ?? null),
+                    'product_count' => is_numeric($f['No of products'] ?? null) ? (int)$f['No of products'] : null,
+                    'raw' => json(array_diff_key($f, ['URL' => 1])),
+                    'synced_at' => $runStart,
+                ]);
+                if (in_array(strtolower($f['Membership Status'] ?? ''), $membership, true) && !in_array($fid, $exclude, true)) {
+                    $selected[$fid] = $f;
+                }
+            }
+            $db->run('DELETE FROM awin_feeds WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
+        });
+        logMsg('feeds: ' . count($feeds) . ', selected: ' . count($selected));
+
+        // Remove products of feeds that are gone or no longer selected.
+        $keep = array_map('strval', array_keys($selected));
+        $notIn = $keep ? ' AND feed_id NOT IN (' . rtrim(str_repeat('?,', count($keep)), ',') . ')' : '';
+        $removed = $db->run("DELETE FROM awin_products WHERE publisher_id = ?$notIn", array_merge([$pid], $keep))->rowCount();
+        $db->run("UPDATE awin_feeds SET imported_version = NULL, imported_rows = NULL, imported_at = NULL WHERE publisher_id = ?$notIn", array_merge([$pid], $keep));
+        if ($removed) {
+            logMsg("removed $removed products of feeds that are no longer selected");
+        }
+
+        $imported = $skipped = 0;
+        foreach ($selected as $fid => $f) {
+            $fid = (string)$fid;
+            $label = "feed $fid (" . ($f['Advertiser Name'] ?? '?') . ')';
+            $version = dt($f['Last Imported'] ?? null);
+            $current = $db->value('SELECT imported_version FROM awin_feeds WHERE publisher_id = ? AND feed_id = ?', [$pid, $fid]);
+            if (!$force && $version !== null && $current === $version) {
+                $skipped++;
+                continue;
+            }
+            $file = "$tmpDir/$pid-" . preg_replace('/[^A-Za-z0-9]/', '', $fid) . '.csv.gz';
+            try {
+                download($f['URL'], $file);
+                $n = importFeed($db, $pid, $fid, $file);
+                $expected = is_numeric($f['No of products'] ?? null) ? (int)$f['No of products'] : 0;
+                if ($n === 0 || $n < $expected / 2) {
+                    // Probably a broken download: keep the previous products, retry next run.
+                    logMsg("$label: only $n of $expected products, keeping the previous version");
+                    continue;
+                }
+                $db->run('DELETE FROM awin_products WHERE publisher_id = ? AND feed_id = ? AND synced_at < ?', [$pid, $fid, $runStart]);
+                $db->run(
+                    'UPDATE awin_feeds SET imported_version = ?, imported_rows = ?, imported_at = ? WHERE publisher_id = ? AND feed_id = ?',
+                    [$version, $n, $runStart, $pid, $fid]
+                );
+                logMsg("$label: $n products");
+                $imported++;
+            } catch (Throwable $e) {
+                logMsg("ERROR $label: " . $e->getMessage());
+            } finally {
+                @unlink($file);
+            }
+        }
+        logMsg("product feeds: $imported imported, $skipped unchanged");
+    }
+}
+
+/** Parses the feed list CSV into rows keyed by its header ("Feed ID", "Membership Status", "URL", ...). */
+function readFeedList(string $file): array
+{
+    $fh = fopen($file, 'r');
+    $header = csvHeader($fh);
+    if (!in_array('Feed ID', $header, true) || !in_array('URL', $header, true)) {
+        fclose($fh);
+        throw new RuntimeException('unexpected feed list format: ' . substr(implode(',', $header), 0, 200));
+    }
+    $feeds = [];
+    while (($row = fgetcsv($fh, null, ',', '"', '')) !== false) {
+        if ($row === [null]) {
+            continue;
+        }
+        $f = array_combine($header, array_pad(array_slice($row, 0, count($header)), count($header), ''));
+        if ($f['Feed ID'] !== '' && $f['URL'] !== '') {
+            $feeds[] = $f;
+        }
+    }
+    fclose($fh);
+    if (!$feeds) {
+        throw new RuntimeException('feed list is empty');
+    }
+    return $feeds;
+}
+
+/** Streams a (gzipped) feed CSV into awin_products in batches. Returns the number of products read. */
+function importFeed(Db $db, int $pid, string $fid, string $file): int
+{
+    $fh = fopen('compress.zlib://' . $file, 'r');
+    if (!$fh) {
+        throw new RuntimeException('cannot open downloaded feed');
+    }
+    $header = csvHeader($fh);
+    $cols = count($header);
+    $n = 0;
+    $batch = [];
+    while (($row = fgetcsv($fh, null, ',', '"', '')) !== false) {
+        if ($row === [null]) {
+            continue;
+        }
+        $p = array_combine($header, array_pad(array_slice($row, 0, $cols), $cols, ''));
+        $product = productRow($pid, $fid, $p);
+        if ($product === null) {
+            continue;
+        }
+        $batch[] = $product;
+        $n++;
+        if (count($batch) >= PRODUCT_BATCH) {
+            $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
+            $batch = [];
+        }
+    }
+    if ($batch) {
+        $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
+    }
+    fclose($fh);
+    return $n;
+}
+
+/** Maps one feed row (Awin or Google format) to an awin_products row. */
+function productRow(int $pid, string $fid, array $p): ?array
+{
+    global $runStart;
+    $get = function (string ...$keys) use ($p): ?string {
+        foreach ($keys as $k) {
+            if (isset($p[$k]) && trim($p[$k]) !== '') {
+                return trim($p[$k]);
+            }
+        }
+        return null;
+    };
+    $key = $get('aw_product_id', 'id');
+    if ($key === null) {
+        return null;
+    }
+
+    // Google format: price = "12.99 EUR", sale_price is the discounted price.
+    $price = $get('search_price', 'sale_price', 'price');
+    $oldPrice = $get('rrp_price', 'product_price_old') ?? (isset($p['sale_price']) && $p['sale_price'] !== '' ? $get('price') : null);
+    $currency = $get('currency');
+    if ($price !== null && preg_match('/^([\d.]+)\s*([A-Z]{3})$/', $price, $m)) {
+        [$price, $currency] = [$m[1], $currency ?? $m[2]];
+    }
+    if ($oldPrice !== null && preg_match('/^([\d.]+)\s*[A-Z]{3}$/', $oldPrice, $m)) {
+        $oldPrice = $m[1];
+    }
+
+    $inStock = null;
+    if (is_numeric($p['in_stock'] ?? null)) {
+        $inStock = (int)$p['in_stock'] > 0 ? 1 : 0;
+    } elseif (($status = $get('stock_status', 'availability')) !== null) {
+        $inStock = preg_match('/out|niet|uitverkocht|unavailable/i', $status) ? 0 : 1;
+    }
+
+    $advertiser = $get('merchant_id', 'advertiser_id');
+    return [
+        'publisher_id' => $pid,
+        'feed_id' => $fid,
+        'product_key' => str($key, 100),
+        'advertiser_id' => is_numeric($advertiser) ? (int)$advertiser : null,
+        'merchant_product_id' => str($get('merchant_product_id', 'id'), 255),
+        'name' => str($get('product_name', 'title'), 500),
+        'brand' => str($get('brand_name', 'brand'), 255),
+        'ean' => str($get('ean', 'product_GTIN', 'gtin', 'upc'), 50),
+        'mpn' => str($get('mpn'), 100),
+        'category' => str($get('merchant_category', 'merchant_product_category_path', 'category_name', 'product_type', 'google_product_category'), 500),
+        'price' => num($price),
+        'old_price' => num($oldPrice),
+        'delivery_cost' => num($get('delivery_cost')),
+        'currency' => str($currency, 3),
+        'in_stock' => $inStock,
+        'deep_link' => $get('aw_deep_link', 'link'),
+        'image_url' => $get('merchant_image_url', 'large_image', 'aw_image_url', 'image_link'),
+        'last_updated' => dt($get('last_updated')),
+        'raw' => json(array_filter($p, fn($v) => $v !== '')),
+        'synced_at' => $runStart,
+    ];
+}
+
+/** Reads a CSV header line (strips a UTF-8 BOM). */
+function csvHeader($fh): array
+{
+    $header = fgetcsv($fh, null, ',', '"', '');
+    if (!$header || $header === [null]) {
+        throw new RuntimeException('empty CSV');
+    }
+    $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', $header[0]);
+    return array_map('trim', $header);
+}
+
+/** Downloads a URL to a file (no API token, not rate limited). The URL is never logged: it contains the datafeed key. */
+function download(string $url, string $file): void
+{
+    for ($attempt = 1; ; $attempt++) {
+        $fh = fopen($file, 'w');
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_FILE => $fh,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_TIMEOUT => 3600,
+            CURLOPT_LOW_SPEED_LIMIT => 1024,   // abort when slower than 1 KB/s for 2 minutes
+            CURLOPT_LOW_SPEED_TIME => 120,
+        ]);
+        $ok = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        fclose($fh);
+
+        if ($ok && $status === 200) {
+            return;
+        }
+        $retry = !$ok || $status === 429 || $status >= 500;
+        if ($retry && $attempt < 3) {
+            sleep(30 * $attempt);
+            continue;
+        }
+        @unlink($file);
+        throw new RuntimeException($ok ? "download HTTP $status" : "download failed: $err");
+    }
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 /** Runs an API call; logs and returns null on non-fatal errors (403, 404, 400...). */
@@ -504,6 +792,18 @@ class Db
             "INSERT INTO $table (`" . implode('`,`', $cols) . '`) VALUES (' . rtrim(str_repeat('?,', count($cols)), ',') . ')'
             . ' ON DUPLICATE KEY UPDATE ' . implode(', ', $updates),
             array_values($row)
+        );
+    }
+
+    /** Multi-row upsert; every row must have the same columns in the same order. */
+    public function upsertMany(string $table, array $rows): void
+    {
+        $cols = array_keys($rows[0]);
+        $tuple = '(' . rtrim(str_repeat('?,', count($cols)), ',') . ')';
+        $this->run(
+            "INSERT INTO $table (`" . implode('`,`', $cols) . '`) VALUES ' . rtrim(str_repeat("$tuple,", count($rows)), ',')
+            . ' ON DUPLICATE KEY UPDATE ' . implode(', ', array_map(fn($c) => "`$c` = VALUES(`$c`)", $cols)),
+            array_merge(...array_map('array_values', $rows))
         );
     }
 

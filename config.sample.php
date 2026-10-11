@@ -46,4 +46,17 @@ return [
 
     // AWIN allows 20 calls/minute per user. Leave a margin.
     'max_calls_per_minute' => 18,
+
+    // Product feeds: feed list download URLs, one per publisher account
+    // (AWIN → Toolbox → Create-a-Feed → "Download feed list"). The URL contains your datafeed key: keep it secret.
+    // [] => no product import.
+    'product_feed_lists' => [
+        // 'https://ui.awin.com/productdata-darwin-download/publisher/123456/YOUR-DATAFEED-KEY/1/feedList',
+    ],
+
+    // Import products only from feeds with this membership status ('active' = you are joined to the programme).
+    'product_feed_membership' => ['active'],
+
+    // Feed IDs to skip, e.g. a second feed of the same advertiser with the same products.
+    'product_feed_exclude' => [],
 ];

@@ -109,6 +109,56 @@ CREATE TABLE IF NOT EXISTS awin_report_rows (
     KEY idx_advertiser (advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
+-- Every feed in the feed list (joined or not). `raw` holds the feed list row without its URL (the URL contains the datafeed key).
+CREATE TABLE IF NOT EXISTS awin_feeds (
+    publisher_id      BIGINT UNSIGNED NOT NULL,
+    feed_id           VARCHAR(20)  NOT NULL,       -- numeric for Awin-format feeds, "F123" for Google-format feeds
+    advertiser_id     BIGINT UNSIGNED NULL,
+    advertiser_name   VARCHAR(255) NULL,
+    primary_region    CHAR(2)      NULL,
+    membership_status VARCHAR(20)  NULL,
+    feed_format       VARCHAR(20)  NULL,
+    feed_name         VARCHAR(255) NULL,
+    language          VARCHAR(50)  NULL,
+    vertical          VARCHAR(100) NULL,
+    awin_imported_at  DATETIME     NULL,           -- "Last Imported": when AWIN last refreshed the feed
+    product_count     INT UNSIGNED NULL,
+    imported_version  DATETIME     NULL,           -- awin_imported_at of the version now in awin_products (NULL = not imported)
+    imported_rows     INT UNSIGNED NULL,
+    imported_at       DATETIME     NULL,
+    raw               JSON NOT NULL,
+    synced_at         DATETIME NOT NULL,
+    PRIMARY KEY (publisher_id, feed_id),
+    KEY idx_advertiser (advertiser_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+
+-- Products from the imported feeds. A feed's rows are replaced when AWIN publishes a new version of it.
+CREATE TABLE IF NOT EXISTS awin_products (
+    publisher_id        BIGINT UNSIGNED NOT NULL,
+    feed_id             VARCHAR(20)  NOT NULL,
+    product_key         VARCHAR(100) NOT NULL,     -- aw_product_id (Awin format) or id (Google format)
+    advertiser_id       BIGINT UNSIGNED NULL,
+    merchant_product_id VARCHAR(255) NULL,
+    name                VARCHAR(500) NULL,
+    brand               VARCHAR(255) NULL,
+    ean                 VARCHAR(50)  NULL,
+    mpn                 VARCHAR(100) NULL,
+    category            VARCHAR(500) NULL,
+    price               DECIMAL(14,4) NULL,
+    old_price           DECIMAL(14,4) NULL,
+    delivery_cost       DECIMAL(14,4) NULL,
+    currency            CHAR(3)      NULL,
+    in_stock            TINYINT(1)   NULL,
+    deep_link           TEXT NULL,                 -- tracking link
+    image_url           TEXT NULL,
+    last_updated        DATETIME NULL,
+    raw                 JSON NOT NULL,             -- the full feed row (empty fields left out)
+    synced_at           DATETIME NOT NULL,
+    PRIMARY KEY (publisher_id, feed_id, product_key),
+    KEY idx_advertiser (advertiser_id),
+    KEY idx_ean (ean)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+
 CREATE TABLE IF NOT EXISTS awin_sync_state (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     part            VARCHAR(30) NOT NULL,
