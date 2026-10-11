@@ -32,3 +32,6 @@ Every table has a `raw` JSON column with the complete AWIN record, so fields wit
 ## Notes
 - AWIN allows 20 calls per minute, and the script stays under that limit. A full static refresh makes about 2 calls per joined advertiser.
 - Logs are in `logs/awin-YYYY-MM-DD.log`.
+
+## License
+MIT, see [LICENSE](LICENSE).
