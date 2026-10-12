@@ -25,7 +25,7 @@ Runs every 4 hours. Static data (programmes, programme details, commission group
 | `awin_promotions` | Offers and vouchers. `is_active = 0` means AWIN no longer returns it as active |
 | `awin_transactions` | Transactions, updated when their status changes |
 | `awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
-| `awin_feeds` | Every feed in the feed list (joined or not), with `imported_version` / `imported_rows` for the feeds that were imported |
+| `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`), with `imported_version` / `imported_rows` for the feeds that were imported |
 | `awin_products` | Products of the feeds whose membership is in `product_feed_membership` (default `active`). A feed's products are replaced when AWIN publishes a new version of it. Products of feeds you leave, or add to `product_feed_exclude`, are deleted |
 | `awin_sync_state` | When the static data was last refreshed |
 

@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS awin_report_rows (
     KEY idx_advertiser (advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
--- Every feed in the feed list (joined or not). `raw` holds the feed list row without its URL (the URL contains the datafeed key).
+-- Feeds from the feed list with a membership in product_feed_membership (default: active). `raw` holds the feed list row without its URL (the URL contains the datafeed key).
 CREATE TABLE IF NOT EXISTS awin_feeds (
     publisher_id      BIGINT UNSIGNED NOT NULL,
     feed_id           VARCHAR(20)  NOT NULL,       -- numeric for Awin-format feeds, "F123" for Google-format feeds

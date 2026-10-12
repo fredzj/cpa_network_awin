@@ -393,8 +393,8 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
 /* ------------------------------------------------------------------ product feeds */
 
 /**
- * Downloads each feed list from config, saves it to awin_feeds and imports the products of the selected feeds
- * (membership in product_feed_membership, not in product_feed_exclude). A feed is only re-imported when its
+ * Downloads each feed list from config, saves the feeds with a membership in product_feed_membership to awin_feeds
+ * and imports their products (except feeds in product_feed_exclude). A feed is only re-imported when its
  * "Last Imported" date in the feed list changed. Products of feeds that are no longer selected are removed.
  */
 function syncProductFeeds(Db $db, array $cfg, bool $force): void
@@ -427,10 +427,15 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
             continue;
         }
 
+        $stored = 0;
         $selected = [];
-        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, &$selected, $runStart) {
+        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, &$stored, &$selected, $runStart) {
             foreach ($feeds as $f) {
+                if (!in_array(strtolower($f['Membership Status'] ?? ''), $membership, true)) {
+                    continue;
+                }
                 $fid = (string)$f['Feed ID'];
+                $stored++;
                 $db->upsert('awin_feeds', [
                     'publisher_id' => $pid,
                     'feed_id' => str($fid, 20),
@@ -447,13 +452,13 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                     'raw' => json(array_diff_key($f, ['URL' => 1])),
                     'synced_at' => $runStart,
                 ]);
-                if (in_array(strtolower($f['Membership Status'] ?? ''), $membership, true) && !in_array($fid, $exclude, true)) {
+                if (!in_array($fid, $exclude, true)) {
                     $selected[$fid] = $f;
                 }
             }
             $db->run('DELETE FROM awin_feeds WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
         });
-        logMsg('feeds: ' . count($feeds) . ', selected: ' . count($selected));
+        logMsg('feeds: ' . count($feeds) . ", stored: $stored, selected: " . count($selected));
 
         // Remove products of feeds that are gone or no longer selected.
         $keep = array_map('strval', array_keys($selected));
