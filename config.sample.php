@@ -41,8 +41,9 @@ return [
     // they are refreshed only when older than this many hours.
     'static_refresh_hours' => 24,
 
-    // Programme relationships to export.
-    'programme_relationships' => ['joined', 'pending', 'suspended', 'rejected'],
+    // Advertiser relationships to export. Programmes, offers and product feeds are limited to advertisers
+    // with one of these relationships ('joined' is always included).
+    'programme_relationships' => ['joined', 'pending', 'rejected'],
 
     // AWIN allows 20 calls/minute per user. Leave a margin.
     'max_calls_per_minute' => 18,

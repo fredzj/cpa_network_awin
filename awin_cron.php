@@ -242,8 +242,14 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
     }
     logMsg('programme details + commission groups: ' . count($joined) . ' advertisers');
 
-    // Offers (promotions + vouchers), all pages. Offers no longer returned are kept with is_active = 0.
-    $count = 0;
+    // Offers (promotions + vouchers), all pages, only of advertisers in awin_programmes.
+    // Offers no longer returned are kept with is_active = 0.
+    $allowed = allowedAdvertisers($db, $pid);
+    if (!$allowed) {
+        logMsg('No programmes known, skipping promotions.');
+        return;
+    }
+    $count = $kept = 0;
     $complete = false;
     $pageSize = 200;
     for ($page = 1; ; $page++) {
@@ -255,8 +261,9 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
             break;
         }
         $rows = $res['data'] ?? (array_is_list($res) ? $res : []);
-        $db->transaction(function () use ($db, $pid, $rows, $runStart) {
-            foreach ($rows as $o) {
+        $keep = array_filter($rows, fn($o) => isset($allowed[(int)($o['advertiser']['id'] ?? 0)]));
+        $db->transaction(function () use ($db, $pid, $keep, $runStart) {
+            foreach ($keep as $o) {
                 $db->upsert('awin_promotions', [
                     'publisher_id' => $pid,
                     'promotion_id' => (int)$o['promotionId'],
@@ -274,6 +281,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
             }
         });
         $count += count($rows);
+        $kept += count($keep);
         $total = $res['pagination']['total'] ?? null;
         if (count($rows) < $pageSize || ($total !== null && $count >= $total)) {
             $complete = true;
@@ -283,7 +291,11 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
     if ($complete) {
         $db->run('UPDATE awin_promotions SET is_active = 0 WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
     }
-    logMsg("promotions: $count");
+    $db->run(
+        'DELETE FROM awin_promotions WHERE publisher_id = ? AND (advertiser_id IS NULL OR advertiser_id NOT IN (SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ?))',
+        [$pid, $pid]
+    );
+    logMsg("promotions: $kept of $count");
 
     $db->upsert('awin_sync_state', ['publisher_id' => $pid, 'part' => 'static', 'last_run_at' => $runStart]);
 }
@@ -393,8 +405,8 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
 /* ------------------------------------------------------------------ product feeds */
 
 /**
- * Downloads each feed list from config, saves the feeds with a membership in product_feed_membership to awin_feeds
- * and imports their products (except feeds in product_feed_exclude). A feed is only re-imported when its
+ * Downloads each feed list from config, saves the feeds with a membership in product_feed_membership of advertisers
+ * in awin_programmes to awin_feeds and imports their products (except feeds in product_feed_exclude). A feed is only re-imported when its
  * "Last Imported" date in the feed list changed. Products of feeds that are no longer selected are removed.
  */
 function syncProductFeeds(Db $db, array $cfg, bool $force): void
@@ -417,6 +429,11 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
         }
         $pid = (int)$m[1];
         logMsg("=== Product feeds publisher $pid ===");
+        $allowed = allowedAdvertisers($db, $pid);
+        if (!$allowed) {
+            logMsg('No programmes known for this publisher (run static first), skipping products.');
+            continue;
+        }
         try {
             $file = "$tmpDir/feedlist-$pid.csv";
             download($listUrl, $file);
@@ -429,9 +446,10 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
 
         $stored = 0;
         $selected = [];
-        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, &$stored, &$selected, $runStart) {
+        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, $allowed, &$stored, &$selected, $runStart) {
             foreach ($feeds as $f) {
-                if (!in_array(strtolower($f['Membership Status'] ?? ''), $membership, true)) {
+                if (!in_array(strtolower($f['Membership Status'] ?? ''), $membership, true)
+                    || !isset($allowed[(int)($f['Advertiser ID'] ?? 0)])) {
                     continue;
                 }
                 $fid = (string)$f['Feed ID'];
@@ -504,6 +522,12 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
         }
         logMsg("product feeds: $imported imported, $skipped unchanged");
     }
+}
+
+/** Advertiser IDs in awin_programmes for a publisher (only the relationships in programme_relationships), as a set. */
+function allowedAdvertisers(Db $db, int $pid): array
+{
+    return array_fill_keys(array_map('intval', $db->column('SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ?', [$pid])), true);
 }
 
 /** Parses the feed list CSV into rows keyed by its header ("Feed ID", "Membership Status", "URL", ...). */

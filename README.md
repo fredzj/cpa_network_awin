@@ -19,14 +19,14 @@ Runs every 4 hours. Static data (programmes, programme details, commission group
 | Table | Contents |
 |---|---|
 | `awin_accounts` | All accounts your AWIN user can access (`GET /accounts`). Unless you set `publishers` in `config.php`, its publisher accounts are the sites the script processes |
-| `awin_programmes` | Programmes per site with your relationship (joined, pending, suspended, rejected; not-joined programmes are skipped) |
+| `awin_programmes` | Programmes per site with your relationship (the relationships in `programme_relationships`, default joined, pending and rejected). Offers and product feeds are limited to these advertisers |
 | `awin_programme_details` | Programme details per joined advertiser |
 | `awin_commission_groups` | Current commission groups per joined advertiser |
-| `awin_promotions` | Offers and vouchers. `is_active = 0` means AWIN no longer returns it as active |
+| `awin_promotions` | Offers and vouchers of the advertisers in `awin_programmes`. `is_active = 0` means AWIN no longer returns it as active |
 | `awin_transactions` | Transactions, updated when their status changes |
 | `awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
-| `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`), with `imported_version` / `imported_rows` for the feeds that were imported |
-| `awin_products` | Products of the feeds whose membership is in `product_feed_membership` (default `active`). A feed's products are replaced when AWIN publishes a new version of it. Products of feeds you leave, or add to `product_feed_exclude`, are deleted |
+| `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`) and whose advertiser is in `awin_programmes`, with `imported_version` / `imported_rows` for the feeds that were imported |
+| `awin_products` | Products of the feeds in `awin_feeds`, except those in `product_feed_exclude`. A feed's products are replaced when AWIN publishes a new version of it. Products of feeds you leave, or add to `product_feed_exclude`, are deleted. Needs the static data: products are skipped until `awin_programmes` is filled |
 | `awin_sync_state` | When the static data was last refreshed |
 
 Every table has a `raw` JSON column with the complete AWIN record, so fields without their own column can still be queried:
