@@ -41,7 +41,7 @@ return [
     // they are refreshed only when older than this many hours.
     'static_refresh_hours' => 24,
 
-    // Advertiser relationships to export. Programmes, offers and product feeds are limited to advertisers
+    // Advertiser relationships to export. Programmes and product feeds are limited to advertisers
     // with one of these relationships ('joined' is always included).
     'programme_relationships' => ['joined', 'pending', 'rejected'],
 

@@ -242,8 +242,9 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
     }
     logMsg('programme details + commission groups: ' . count($joined) . ' advertisers');
 
-    // Offers (promotions + vouchers), all pages, only of advertisers in awin_programmes.
-    // Offers no longer returned are kept with is_active = 0.
+    // Offers (promotions + vouchers) of joined advertisers, all pages. Asking AWIN for membership 'all' returns
+    // tens of thousands of offers, so pending/rejected advertisers are left out. Offers no longer returned are
+    // kept with is_active = 0.
     $allowed = allowedAdvertisers($db, $pid);
     if (!$allowed) {
         logMsg('No programmes known, skipping promotions.');
@@ -254,7 +255,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
     $pageSize = 200;
     for ($page = 1; ; $page++) {
         $res = tryCall(fn() => $api->post("/publisher/$pid/promotions", [
-            'filters' => ['membership' => 'all', 'status' => 'active', 'type' => 'all'],
+            'filters' => ['membership' => 'joined', 'status' => 'active', 'type' => 'all'],
             'pagination' => ['page' => $page, 'pageSize' => $pageSize],
         ]), "promotions page $page");
         if ($res === null) {
@@ -292,7 +293,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         $db->run('UPDATE awin_promotions SET is_active = 0 WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
     }
     $db->run(
-        'DELETE FROM awin_promotions WHERE publisher_id = ? AND (advertiser_id IS NULL OR advertiser_id NOT IN (SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ?))',
+        "DELETE FROM awin_promotions WHERE publisher_id = ? AND (advertiser_id IS NULL OR advertiser_id NOT IN (SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ? AND relationship = 'joined'))",
         [$pid, $pid]
     );
     logMsg("promotions: $kept of $count");

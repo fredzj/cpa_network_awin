@@ -19,10 +19,10 @@ Runs every 4 hours. Static data (programmes, programme details, commission group
 | Table | Contents |
 |---|---|
 | `awin_accounts` | All accounts your AWIN user can access (`GET /accounts`). Unless you set `publishers` in `config.php`, its publisher accounts are the sites the script processes |
-| `awin_programmes` | Programmes per site with your relationship (the relationships in `programme_relationships`, default joined, pending and rejected). Offers and product feeds are limited to these advertisers |
+| `awin_programmes` | Programmes per site with your relationship (the relationships in `programme_relationships`, default joined, pending and rejected). Product feeds are limited to these advertisers |
 | `awin_programme_details` | Programme details per joined advertiser |
 | `awin_commission_groups` | Current commission groups per joined advertiser |
-| `awin_promotions` | Offers and vouchers of the advertisers in `awin_programmes`. `is_active = 0` means AWIN no longer returns it as active |
+| `awin_promotions` | Offers and vouchers of your joined advertisers. `is_active = 0` means AWIN no longer returns it as active |
 | `awin_transactions` | Transactions, updated when their status changes |
 | `awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
 | `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`) and whose advertiser is in `awin_programmes`, with `imported_version` / `imported_rows` for the feeds that were imported |
