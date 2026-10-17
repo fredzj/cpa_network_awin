@@ -124,13 +124,16 @@ CREATE TABLE IF NOT EXISTS awin_feeds (
     awin_imported_at  DATETIME     NULL,           -- "Last Imported": when AWIN last refreshed the feed
     product_count     INT UNSIGNED NULL,
     imported_version  DATETIME     NULL,           -- awin_imported_at of the version now in awin_products (NULL = not imported)
-    imported_rows     INT UNSIGNED NULL,
+    imported_filter   CHAR(32)     NULL,           -- hash of the product_categories filter used (NULL = all categories)
+    imported_rows     INT UNSIGNED NULL,           -- products saved (after the category filter)
     imported_at       DATETIME     NULL,
     raw               JSON NOT NULL,
     synced_at         DATETIME NOT NULL,
     PRIMARY KEY (publisher_id, feed_id),
     KEY idx_advertiser (advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+
+ALTER TABLE awin_feeds ADD COLUMN IF NOT EXISTS imported_filter CHAR(32) NULL AFTER imported_version;
 
 -- Products from the imported feeds. A feed's rows are replaced when AWIN publishes a new version of it.
 CREATE TABLE IF NOT EXISTS awin_products (

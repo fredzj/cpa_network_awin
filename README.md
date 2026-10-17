@@ -26,7 +26,7 @@ Runs every 4 hours. Static data (programmes, programme details, commission group
 | `awin_transactions` | Transactions, updated when their status changes |
 | `awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
 | `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`) and whose advertiser is in `awin_programmes`, with `imported_version` / `imported_rows` for the feeds that were imported |
-| `awin_products` | Products of the feeds in `awin_feeds`, except those in `product_feed_exclude`. A feed's products are replaced when AWIN publishes a new version of it. Products of feeds you leave, or add to `product_feed_exclude`, are deleted. Needs the static data: products are skipped until `awin_programmes` is filled |
+| `awin_products` | Products of the feeds in `awin_feeds`: only the feeds in `product_feed_include` (when set), never those in `product_feed_exclude`, and only products whose category contains one of the texts in `product_categories` (when set, for all feeds or per feed ID). A feed's products are replaced when AWIN publishes a new version of it or its category filter changes. Products of feeds you leave, or that are no longer selected, are deleted. Needs the static data: products are skipped until `awin_programmes` is filled |
 | `awin_sync_state` | When the static data was last refreshed |
 
 Every table has a `raw` JSON column with the complete AWIN record, so fields without their own column can still be queried:
@@ -36,7 +36,7 @@ Product descriptions are only in `raw`: `JSON_VALUE(raw, '$.description')`.
 ## Notes
 - AWIN allows 20 calls per minute, and the script stays under that limit. A full static refresh makes about 2 calls per joined advertiser.
 - Logs are in `logs/awin-YYYY-MM-DD.log`. Feeds are downloaded to `logs/feed-tmp/` and deleted after import.
-- Product feeds can be large (Conrad alone has about 830,000 products per feed). Check your database quota, and use `product_feed_exclude` for feeds you do not need. `--only=products --force-products` re-imports all feeds.
+- Product feeds can be large (Conrad alone has about 830,000 products per feed). Check your database quota, and use `product_feed_include` / `product_feed_exclude` and `product_categories` to import only what you need. `--only=products --force-products` re-imports all feeds.
 
 ## License
 MIT, see [LICENSE](LICENSE).

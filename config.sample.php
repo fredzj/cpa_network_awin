@@ -60,4 +60,13 @@ return [
 
     // Feed IDs to skip, e.g. a second feed of the same advertiser with the same products.
     'product_feed_exclude' => [],
+
+    // Feed IDs to import. [] => every feed (except product_feed_exclude).
+    'product_feed_include' => [],
+
+    // Only import products whose category contains one of these texts (case-insensitive).
+    //   []                                       => all products
+    //   ['Laptop', 'Smartphone']                 => for every feed
+    //   [116948 => ['Laptop', 'Smartphone']]     => for this feed only; other feeds use the general texts, or import everything
+    'product_categories' => [],
 ];

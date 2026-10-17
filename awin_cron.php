@@ -407,8 +407,9 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
 
 /**
  * Downloads each feed list from config, saves the feeds with a membership in product_feed_membership of advertisers
- * in awin_programmes to awin_feeds and imports their products (except feeds in product_feed_exclude). A feed is only re-imported when its
- * "Last Imported" date in the feed list changed. Products of feeds that are no longer selected are removed.
+ * in awin_programmes to awin_feeds and imports their products (only feeds in product_feed_include when set, never feeds in
+ * product_feed_exclude; only categories in product_categories when set). A feed is only re-imported when its "Last Imported"
+ * date in the feed list or its category filter changed. Products of feeds that are no longer selected are removed.
  */
 function syncProductFeeds(Db $db, array $cfg, bool $force): void
 {
@@ -420,6 +421,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
     }
     $membership = array_map('strtolower', $cfg['product_feed_membership'] ?? ['active']);
     $exclude = array_map('strval', $cfg['product_feed_exclude'] ?? []);
+    $include = array_map('strval', $cfg['product_feed_include'] ?? []);
     $tmpDir = $cfg['log_dir'] . '/feed-tmp';
     @mkdir($tmpDir, 0750, true);
 
@@ -447,7 +449,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
 
         $stored = 0;
         $selected = [];
-        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, $allowed, &$stored, &$selected, $runStart) {
+        $db->transaction(function () use ($db, $pid, $feeds, $membership, $exclude, $include, $allowed, &$stored, &$selected, $runStart) {
             foreach ($feeds as $f) {
                 if (!in_array(strtolower($f['Membership Status'] ?? ''), $membership, true)
                     || !isset($allowed[(int)($f['Advertiser ID'] ?? 0)])) {
@@ -471,7 +473,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                     'raw' => json(array_diff_key($f, ['URL' => 1])),
                     'synced_at' => $runStart,
                 ]);
-                if (!in_array($fid, $exclude, true)) {
+                if (!in_array($fid, $exclude, true) && (!$include || in_array($fid, $include, true))) {
                     $selected[$fid] = $f;
                 }
             }
@@ -483,7 +485,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
         $keep = array_map('strval', array_keys($selected));
         $notIn = $keep ? ' AND feed_id NOT IN (' . rtrim(str_repeat('?,', count($keep)), ',') . ')' : '';
         $removed = $db->run("DELETE FROM awin_products WHERE publisher_id = ?$notIn", array_merge([$pid], $keep))->rowCount();
-        $db->run("UPDATE awin_feeds SET imported_version = NULL, imported_rows = NULL, imported_at = NULL WHERE publisher_id = ?$notIn", array_merge([$pid], $keep));
+        $db->run("UPDATE awin_feeds SET imported_version = NULL, imported_filter = NULL, imported_rows = NULL, imported_at = NULL WHERE publisher_id = ?$notIn", array_merge([$pid], $keep));
         if ($removed) {
             logMsg("removed $removed products of feeds that are no longer selected");
         }
@@ -493,15 +495,17 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
             $fid = (string)$fid;
             $label = "feed $fid (" . ($f['Advertiser Name'] ?? '?') . ')';
             $version = dt($f['Last Imported'] ?? null);
-            $current = $db->value('SELECT imported_version FROM awin_feeds WHERE publisher_id = ? AND feed_id = ?', [$pid, $fid]);
-            if (!$force && $version !== null && $current === $version) {
+            $categories = categoryFilter($cfg, $fid);
+            $filter = $categories ? md5(json_encode($categories)) : null;
+            $current = $db->run('SELECT imported_version, imported_filter FROM awin_feeds WHERE publisher_id = ? AND feed_id = ?', [$pid, $fid])->fetch(PDO::FETCH_ASSOC);
+            if (!$force && $version !== null && $current && $current['imported_version'] === $version && $current['imported_filter'] === $filter) {
                 $skipped++;
                 continue;
             }
             $file = "$tmpDir/$pid-" . preg_replace('/[^A-Za-z0-9]/', '', $fid) . '.csv.gz';
             try {
                 download($f['URL'], $file);
-                $n = importFeed($db, $pid, $fid, $file);
+                [$n, $kept] = importFeed($db, $pid, $fid, $file, $categories);
                 $expected = is_numeric($f['No of products'] ?? null) ? (int)$f['No of products'] : 0;
                 if ($n === 0 || $n < $expected / 2) {
                     // Probably a broken download: keep the previous products, retry next run.
@@ -510,10 +514,10 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                 }
                 $db->run('DELETE FROM awin_products WHERE publisher_id = ? AND feed_id = ? AND synced_at < ?', [$pid, $fid, $runStart]);
                 $db->run(
-                    'UPDATE awin_feeds SET imported_version = ?, imported_rows = ?, imported_at = ? WHERE publisher_id = ? AND feed_id = ?',
-                    [$version, $n, $runStart, $pid, $fid]
+                    'UPDATE awin_feeds SET imported_version = ?, imported_filter = ?, imported_rows = ?, imported_at = ? WHERE publisher_id = ? AND feed_id = ?',
+                    [$version, $filter, $kept, $runStart, $pid, $fid]
                 );
-                logMsg("$label: $n products");
+                logMsg($categories ? "$label: $kept of $n products in the selected categories" : "$label: $n products");
                 $imported++;
             } catch (Throwable $e) {
                 logMsg("ERROR $label: " . $e->getMessage());
@@ -523,6 +527,39 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
         }
         logMsg("product feeds: $imported imported, $skipped unchanged");
     }
+}
+
+/**
+ * Category texts for a feed from product_categories: its own list when the feed has one (key = feed ID),
+ * otherwise the general texts. [] = all categories.
+ */
+function categoryFilter(array $cfg, string $fid): array
+{
+    $general = [];
+    foreach ($cfg['product_categories'] ?? [] as $key => $value) {
+        if (is_array($value)) {
+            if ((string)$key === $fid) {
+                return array_values(array_map('strval', $value));
+            }
+        } else {
+            $general[] = (string)$value;
+        }
+    }
+    return $general;
+}
+
+/** True when the category contains one of the texts (case-insensitive). */
+function categoryMatches(?string $category, array $texts): bool
+{
+    if ($category === null) {
+        return false;
+    }
+    foreach ($texts as $t) {
+        if ($t !== '' && (function_exists('mb_stripos') ? mb_stripos($category, $t) : stripos($category, $t)) !== false) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /** Advertiser IDs in awin_programmes for a publisher (only the relationships in programme_relationships), as a set. */
@@ -557,8 +594,11 @@ function readFeedList(string $file): array
     return $feeds;
 }
 
-/** Streams a (gzipped) feed CSV into awin_products in batches. Returns the number of products read. */
-function importFeed(Db $db, int $pid, string $fid, string $file): int
+/**
+ * Streams a (gzipped) feed CSV into awin_products in batches, only products in one of the $categories ([] = all).
+ * Returns [products read, products saved].
+ */
+function importFeed(Db $db, int $pid, string $fid, string $file, array $categories = []): array
 {
     $fh = fopen('compress.zlib://' . $file, 'r');
     if (!$fh) {
@@ -566,7 +606,7 @@ function importFeed(Db $db, int $pid, string $fid, string $file): int
     }
     $header = csvHeader($fh);
     $cols = count($header);
-    $n = 0;
+    $n = $kept = 0;
     $batch = [];
     while (($row = fgetcsv($fh, null, ',', '"', '')) !== false) {
         if ($row === [null]) {
@@ -577,8 +617,12 @@ function importFeed(Db $db, int $pid, string $fid, string $file): int
         if ($product === null) {
             continue;
         }
-        $batch[] = $product;
         $n++;
+        if ($categories && !categoryMatches($product['category'], $categories)) {
+            continue;
+        }
+        $batch[] = $product;
+        $kept++;
         if (count($batch) >= PRODUCT_BATCH) {
             $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
             $batch = [];
@@ -588,7 +632,7 @@ function importFeed(Db $db, int $pid, string $fid, string $file): int
         $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
     }
     fclose($fh);
-    return $n;
+    return [$n, $kept];
 }
 
 /** Maps one feed row (Awin or Google format) to an awin_products row. */
