@@ -60,8 +60,9 @@ if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
-$today = new DateTimeImmutable('today');
-$runStart = gmdate('Y-m-d H:i:s');   // every row written in this run gets synced_at = $runStart
+$timezone = new DateTimeZone('Europe/Amsterdam');
+$today = new DateTimeImmutable('today', $timezone);
+$runStart = date('Y-m-d H:i:s');   // every row written in this run gets synced_at = $runStart
 
 try {
     $db = new Db($cfg['db']);
