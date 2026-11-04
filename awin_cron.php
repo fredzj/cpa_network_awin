@@ -62,7 +62,9 @@ if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
 
 $timezone = new DateTimeZone('Europe/Amsterdam');
 $today = new DateTimeImmutable('today', $timezone);
-$runStart = date('Y-m-d H:i:s');   // every row written in this run gets synced_at = $runStart
+//$runStart = date('Y-m-d H:i:s');   // every row written in this run gets synced_at = $runStart
+$runStart = (new DateTimeImmutable('now', new DateTimeZone('Europe/Amsterdam')))
+    ->format('Y-m-d H:i:s');
 
 try {
     $db = new Db($cfg['db']);
