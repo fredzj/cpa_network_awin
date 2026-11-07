@@ -18,19 +18,19 @@ Runs every 4 hours. Static data (programmes, programme details, commission group
 ## Tables
 | Table | Contents |
 |---|---|
-| `awin_accounts` | All accounts your AWIN user can access (`GET /accounts`). Unless you set `publishers` in `config.php`, its publisher accounts are the sites the script processes |
-| `awin_programmes` | Programmes per site with your relationship (the relationships in `programme_relationships`, default joined, pending and rejected). Product feeds are limited to these advertisers |
-| `awin_programme_details` | Programme details per joined advertiser |
-| `awin_commission_groups` | Current commission groups per joined advertiser |
-| `awin_promotions` | Offers and vouchers of your joined advertisers. `is_active = 0` means AWIN no longer returns it as active |
-| `awin_transactions` | Transactions, updated when their status changes |
-| `awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
-| `awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`) and whose advertiser is in `awin_programmes`, with `imported_version` / `imported_rows` for the feeds that were imported |
-| `awin_products` | Products of the feeds in `awin_feeds`: only the feeds in `product_feed_include` (when set), never those in `product_feed_exclude`, and only products whose category contains one of the texts in `product_categories` (when set, for all feeds or per feed ID). A feed's products are replaced when AWIN publishes a new version of it or its category filter changes. Products of feeds you leave, or that are no longer selected, are deleted. Needs the static data: products are skipped until `awin_programmes` is filled |
-| `awin_sync_state` | When the static data was last refreshed |
+| `cpa_network_awin_accounts` | All accounts your AWIN user can access (`GET /accounts`). Unless you set `publishers` in `config.php`, its publisher accounts are the sites the script processes |
+| `cpa_network_awin_programmes` | Programmes per site with your relationship (the relationships in `programme_relationships`, default joined, pending and rejected). Product feeds are limited to these advertisers |
+| `cpa_network_awin_programme_details` | Programme details per joined advertiser |
+| `cpa_network_awin_commission_groups` | Current commission groups per joined advertiser |
+| `cpa_network_awin_promotions` | Offers and vouchers of your joined advertisers. `is_active = 0` means AWIN no longer returns it as active |
+| `cpa_network_awin_transactions` | Transactions, updated when their status changes |
+| `cpa_network_awin_report_rows` | Advertiser, creative and campaign reports, one row per line per day per region |
+| `cpa_network_awin_feeds` | Feeds from the feed list whose membership is in `product_feed_membership` (default `active`) and whose advertiser is in `cpa_network_awin_programmes`, with `imported_version` / `imported_rows` for the feeds that were imported |
+| `cpa_network_awin_products` | Products of the feeds in `cpa_network_awin_feeds`: only the feeds in `product_feed_include` (when set), never those in `product_feed_exclude`, and only products whose category contains one of the texts in `product_categories` (when set, for all feeds or per feed ID). A feed's products are replaced when AWIN publishes a new version of it or its category filter changes. Products of feeds you leave, or that are no longer selected, are deleted. Needs the static data: products are skipped until `cpa_network_awin_programmes` is filled |
+| `cpa_network_awin_sync_state` | When the static data was last refreshed |
 
 Every table has a `raw` JSON column with the complete AWIN record, so fields without their own column can still be queried:
-`SELECT JSON_VALUE(raw, '$.advertiserName') FROM awin_report_rows`.
+`SELECT JSON_VALUE(raw, '$.advertiserName') FROM cpa_network_awin_report_rows`.
 Product descriptions are only in `raw`: `JSON_VALUE(raw, '$.description')`.
 
 ## Notes

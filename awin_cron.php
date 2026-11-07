@@ -2,17 +2,17 @@
 /**
  * AWIN publisher data exporter — run from cron (PHP CLI). Saves everything into MariaDB (see schema.sql).
  *
- *   awin_accounts            GET  /accounts
+ *   cpa_network_awin_accounts            GET  /accounts
  * Per publisher account ("site"):
- *   awin_programmes          GET  /publishers/{id}/programmes
- *   awin_programme_details   GET  /publishers/{id}/programmedetails      (per joined advertiser)
- *   awin_commission_groups   GET  /publishers/{id}/commissiongroups      (per joined advertiser)
- *   awin_promotions          POST /publisher/{id}/promotions
- *   awin_transactions        GET  /publishers/{id}/transactions/
- *   awin_report_rows         GET  /publishers/{id}/reports/{advertiser|creative|campaign}
+ *   cpa_network_awin_programmes          GET  /publishers/{id}/programmes
+ *   cpa_network_awin_programme_details   GET  /publishers/{id}/programmedetails      (per joined advertiser)
+ *   cpa_network_awin_commission_groups   GET  /publishers/{id}/commissiongroups      (per joined advertiser)
+ *   cpa_network_awin_promotions          POST /publisher/{id}/promotions
+ *   cpa_network_awin_transactions        GET  /publishers/{id}/transactions/
+ *   cpa_network_awin_report_rows         GET  /publishers/{id}/reports/{advertiser|creative|campaign}
  * Per feed list URL in config (product_feed_lists):
- *   awin_feeds               the feed list (CSV)
- *   awin_products            products of the feeds you are joined to (CSV.gz per feed; only re-imported when AWIN refreshed it)
+ *   cpa_network_awin_feeds               the feed list (CSV)
+ *   cpa_network_awin_products            products of the feeds you are joined to (CSV.gz per feed; only re-imported when AWIN refreshed it)
  *
  * Usage:
  *   php awin_cron.php                                  normal run (lookback window from config)
@@ -117,7 +117,7 @@ try {
 /* ------------------------------------------------------------------ sync steps */
 
 /**
- * GET /accounts — every account the token's user can access. Saved to awin_accounts
+ * GET /accounts — every account the token's user can access. Saved to cpa_network_awin_accounts
  * and used to find the publisher accounts ("sites") unless they are set in config.
  */
 function resolvePublishers(AwinClient $api, Db $db, array $cfg): array
@@ -131,7 +131,7 @@ function resolvePublishers(AwinClient $api, Db $db, array $cfg): array
 
     $names = [];
     foreach ($accounts as $acc) {
-        $db->upsert('awin_accounts', [
+        $db->upsert('cpa_network_awin_accounts', [
             'account_id' => (int)$acc['accountId'],
             'account_name' => str($acc['accountName'] ?? null, 255),
             'account_type' => str($acc['accountType'] ?? null, 20),
@@ -162,7 +162,7 @@ function resolvePublishers(AwinClient $api, Db $db, array $cfg): array
 function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force): void
 {
     global $runStart;
-    $last = $db->value('SELECT last_run_at FROM awin_sync_state WHERE publisher_id = ? AND part = ?', [$pid, 'static']);
+    $last = $db->value('SELECT last_run_at FROM cpa_network_awin_sync_state WHERE publisher_id = ? AND part = ?', [$pid, 'static']);
     if (!$force && $last && time() - strtotime($last . ' UTC') < (int)$cfg['static_refresh_hours'] * 3600) {
         logMsg('Static data is fresh, skipping (use --force-static to override).');
         return;
@@ -181,7 +181,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         }
         $db->transaction(function () use ($db, $pid, $rel, $list, $runStart) {
             foreach ($list as $p) {
-                $db->upsert('awin_programmes', [
+                $db->upsert('cpa_network_awin_programmes', [
                     'publisher_id' => $pid,
                     'advertiser_id' => (int)$p['id'],
                     'relationship' => $rel,
@@ -193,7 +193,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
                     'synced_at' => $runStart,
                 ]);
             }
-            $db->run('DELETE FROM awin_programmes WHERE publisher_id = ? AND relationship = ? AND synced_at < ?', [$pid, $rel, $runStart]);
+            $db->run('DELETE FROM cpa_network_awin_programmes WHERE publisher_id = ? AND relationship = ? AND synced_at < ?', [$pid, $rel, $runStart]);
         });
         logMsg("programmes/$rel: " . count($list));
         if ($rel === 'joined') {
@@ -202,7 +202,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
     }
     // Drop rows of relationships that are no longer exported (e.g. removed from config).
     $db->run(
-        'DELETE FROM awin_programmes WHERE publisher_id = ? AND relationship NOT IN (' . rtrim(str_repeat('?,', count($relationships)), ',') . ')',
+        'DELETE FROM cpa_network_awin_programmes WHERE publisher_id = ? AND relationship NOT IN (' . rtrim(str_repeat('?,', count($relationships)), ',') . ')',
         array_merge([$pid], $relationships)
     );
 
@@ -212,7 +212,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         $aid = (int)$p['id'];
         $d = tryCall(fn() => $api->get("/publishers/$pid/programmedetails", ['advertiserId' => $aid, 'relationship' => 'joined']), "programmedetails/$aid");
         if ($d !== null) {
-            $db->upsert('awin_programme_details', ['publisher_id' => $pid, 'advertiser_id' => $aid, 'raw' => json($d), 'synced_at' => $runStart]);
+            $db->upsert('cpa_network_awin_programme_details', ['publisher_id' => $pid, 'advertiser_id' => $aid, 'raw' => json($d), 'synced_at' => $runStart]);
         }
 
         $g = tryCall(fn() => $api->get("/publishers/$pid/commissiongroups", [
@@ -223,9 +223,9 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         if ($g !== null) {
             $groups = $g['commissionGroups'] ?? (array_is_list($g) ? $g : []);
             $db->transaction(function () use ($db, $pid, $aid, $groups, $runStart) {
-                $db->run('DELETE FROM awin_commission_groups WHERE publisher_id = ? AND advertiser_id = ?', [$pid, $aid]);
+                $db->run('DELETE FROM cpa_network_awin_commission_groups WHERE publisher_id = ? AND advertiser_id = ?', [$pid, $aid]);
                 foreach ($groups as $i => $grp) {
-                    $db->upsert('awin_commission_groups', [
+                    $db->upsert('cpa_network_awin_commission_groups', [
                         'publisher_id' => $pid,
                         'advertiser_id' => $aid,
                         'group_key' => str((string)($grp['groupId'] ?? $grp['groupCode'] ?? "idx$i"), 100),
@@ -268,7 +268,7 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         $keep = array_filter($rows, fn($o) => isset($allowed[(int)($o['advertiser']['id'] ?? 0)]));
         $db->transaction(function () use ($db, $pid, $keep, $runStart) {
             foreach ($keep as $o) {
-                $db->upsert('awin_promotions', [
+                $db->upsert('cpa_network_awin_promotions', [
                     'publisher_id' => $pid,
                     'promotion_id' => (int)$o['promotionId'],
                     'advertiser_id' => isset($o['advertiser']['id']) ? (int)$o['advertiser']['id'] : null,
@@ -293,15 +293,15 @@ function syncStatic(AwinClient $api, Db $db, array $cfg, int $pid, bool $force):
         }
     }
     if ($complete) {
-        $db->run('UPDATE awin_promotions SET is_active = 0 WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
+        $db->run('UPDATE cpa_network_awin_promotions SET is_active = 0 WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
     }
     $db->run(
-        "DELETE FROM awin_promotions WHERE publisher_id = ? AND (advertiser_id IS NULL OR advertiser_id NOT IN (SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ? AND relationship = 'joined'))",
+        "DELETE FROM cpa_network_awin_promotions WHERE publisher_id = ? AND (advertiser_id IS NULL OR advertiser_id NOT IN (SELECT advertiser_id FROM cpa_network_awin_programmes WHERE publisher_id = ? AND relationship = 'joined'))",
         [$pid, $pid]
     );
     logMsg("promotions: $kept of $count");
 
-    $db->upsert('awin_sync_state', ['publisher_id' => $pid, 'part' => 'static', 'last_run_at' => $runStart]);
+    $db->upsert('cpa_network_awin_sync_state', ['publisher_id' => $pid, 'part' => 'static', 'last_run_at' => $runStart]);
 }
 
 function syncTransactions(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmutable $from, DateTimeImmutable $to): void
@@ -323,7 +323,7 @@ function syncTransactions(AwinClient $api, Db $db, array $cfg, int $pid, DateTim
 
         $db->transaction(function () use ($db, $pid, $rows, $runStart) {
             foreach ($rows as $t) {
-                $db->upsert('awin_transactions', [
+                $db->upsert('cpa_network_awin_transactions', [
                     'transaction_id' => (int)$t['id'],
                     'publisher_id' => (int)($t['publisherId'] ?? $pid),
                     'advertiser_id' => isset($t['advertiserId']) ? (int)$t['advertiserId'] : null,
@@ -351,7 +351,7 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
 {
     global $runStart;
     $regions = $cfg['report_regions'] ?: $db->column(
-        "SELECT DISTINCT primary_region FROM awin_programmes WHERE publisher_id = ? AND relationship = 'joined' AND primary_region IS NOT NULL",
+        "SELECT DISTINCT primary_region FROM cpa_network_awin_programmes WHERE publisher_id = ? AND relationship = 'joined' AND primary_region IS NOT NULL",
         [$pid]
     );
     $regions = array_values(array_intersect(array_map('strtoupper', $regions), REPORT_REGIONS));
@@ -378,9 +378,9 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
                 $rows = array_is_list($res) ? $res : [$res];
                 // Replace the whole (publisher, type, region, day) slice.
                 $db->transaction(function () use ($db, $pid, $type, $region, $day, $rows, $runStart) {
-                    $db->run('DELETE FROM awin_report_rows WHERE publisher_id = ? AND report_type = ? AND region = ? AND report_date = ?', [$pid, $type, $region, $day]);
+                    $db->run('DELETE FROM cpa_network_awin_report_rows WHERE publisher_id = ? AND report_type = ? AND region = ? AND report_date = ?', [$pid, $type, $region, $day]);
                     foreach ($rows as $r) {
-                        $db->insert('awin_report_rows', [
+                        $db->insert('cpa_network_awin_report_rows', [
                             'publisher_id' => $pid,
                             'report_type' => $type,
                             'region' => $region,
@@ -410,7 +410,7 @@ function syncReports(AwinClient $api, Db $db, array $cfg, int $pid, DateTimeImmu
 
 /**
  * Downloads each feed list from config, saves the feeds with a membership in product_feed_membership of advertisers
- * in awin_programmes to awin_feeds and imports their products (only feeds in product_feed_include when set, never feeds in
+ * in cpa_network_awin_programmes to cpa_network_awin_feeds and imports their products (only feeds in product_feed_include when set, never feeds in
  * product_feed_exclude; only categories in product_categories when set). A feed is only re-imported when its "Last Imported"
  * date in the feed list or its category filter changed. Products of feeds that are no longer selected are removed.
  */
@@ -460,7 +460,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                 }
                 $fid = (string)$f['Feed ID'];
                 $stored++;
-                $db->upsert('awin_feeds', [
+                $db->upsert('cpa_network_awin_feeds', [
                     'publisher_id' => $pid,
                     'feed_id' => str($fid, 20),
                     'advertiser_id' => is_numeric($f['Advertiser ID'] ?? null) ? (int)$f['Advertiser ID'] : null,
@@ -480,15 +480,15 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                     $selected[$fid] = $f;
                 }
             }
-            $db->run('DELETE FROM awin_feeds WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
+            $db->run('DELETE FROM cpa_network_awin_feeds WHERE publisher_id = ? AND synced_at < ?', [$pid, $runStart]);
         });
         logMsg('feeds: ' . count($feeds) . ", stored: $stored, selected: " . count($selected));
 
         // Remove products of feeds that are gone or no longer selected.
         $keep = array_map('strval', array_keys($selected));
         $notIn = $keep ? ' AND feed_id NOT IN (' . rtrim(str_repeat('?,', count($keep)), ',') . ')' : '';
-        $removed = $db->run("DELETE FROM awin_products WHERE publisher_id = ?$notIn", array_merge([$pid], $keep))->rowCount();
-        $db->run("UPDATE awin_feeds SET imported_version = NULL, imported_filter = NULL, imported_rows = NULL, imported_at = NULL WHERE publisher_id = ?$notIn", array_merge([$pid], $keep));
+        $removed = $db->run("DELETE FROM cpa_network_awin_products WHERE publisher_id = ?$notIn", array_merge([$pid], $keep))->rowCount();
+        $db->run("UPDATE cpa_network_awin_feeds SET imported_version = NULL, imported_filter = NULL, imported_rows = NULL, imported_at = NULL WHERE publisher_id = ?$notIn", array_merge([$pid], $keep));
         if ($removed) {
             logMsg("removed $removed products of feeds that are no longer selected");
         }
@@ -500,7 +500,7 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
             $version = dt($f['Last Imported'] ?? null);
             $categories = categoryFilter($cfg, $fid);
             $filter = $categories ? md5(json_encode($categories)) : null;
-            $current = $db->run('SELECT imported_version, imported_filter FROM awin_feeds WHERE publisher_id = ? AND feed_id = ?', [$pid, $fid])->fetch(PDO::FETCH_ASSOC);
+            $current = $db->run('SELECT imported_version, imported_filter FROM cpa_network_awin_feeds WHERE publisher_id = ? AND feed_id = ?', [$pid, $fid])->fetch(PDO::FETCH_ASSOC);
             if (!$force && $version !== null && $current && $current['imported_version'] === $version && $current['imported_filter'] === $filter) {
                 $skipped++;
                 continue;
@@ -515,9 +515,9 @@ function syncProductFeeds(Db $db, array $cfg, bool $force): void
                     logMsg("$label: only $n of $expected products, keeping the previous version");
                     continue;
                 }
-                $db->run('DELETE FROM awin_products WHERE publisher_id = ? AND feed_id = ? AND synced_at < ?', [$pid, $fid, $runStart]);
+                $db->run('DELETE FROM cpa_network_awin_products WHERE publisher_id = ? AND feed_id = ? AND synced_at < ?', [$pid, $fid, $runStart]);
                 $db->run(
-                    'UPDATE awin_feeds SET imported_version = ?, imported_filter = ?, imported_rows = ?, imported_at = ? WHERE publisher_id = ? AND feed_id = ?',
+                    'UPDATE cpa_network_awin_feeds SET imported_version = ?, imported_filter = ?, imported_rows = ?, imported_at = ? WHERE publisher_id = ? AND feed_id = ?',
                     [$version, $filter, $kept, $runStart, $pid, $fid]
                 );
                 logMsg($categories ? "$label: $kept of $n products in the selected categories" : "$label: $n products");
@@ -565,10 +565,10 @@ function categoryMatches(?string $category, array $texts): bool
     return false;
 }
 
-/** Advertiser IDs in awin_programmes for a publisher (only the relationships in programme_relationships), as a set. */
+/** Advertiser IDs in cpa_network_awin_programmes for a publisher (only the relationships in programme_relationships), as a set. */
 function allowedAdvertisers(Db $db, int $pid): array
 {
-    return array_fill_keys(array_map('intval', $db->column('SELECT advertiser_id FROM awin_programmes WHERE publisher_id = ?', [$pid])), true);
+    return array_fill_keys(array_map('intval', $db->column('SELECT advertiser_id FROM cpa_network_awin_programmes WHERE publisher_id = ?', [$pid])), true);
 }
 
 /** Parses the feed list CSV into rows keyed by its header ("Feed ID", "Membership Status", "URL", ...). */
@@ -598,7 +598,7 @@ function readFeedList(string $file): array
 }
 
 /**
- * Streams a (gzipped) feed CSV into awin_products in batches, only products in one of the $categories ([] = all).
+ * Streams a (gzipped) feed CSV into cpa_network_awin_products in batches, only products in one of the $categories ([] = all).
  * Returns [products read, products saved].
  */
 function importFeed(Db $db, int $pid, string $fid, string $file, array $categories = []): array
@@ -627,18 +627,18 @@ function importFeed(Db $db, int $pid, string $fid, string $file, array $categori
         $batch[] = $product;
         $kept++;
         if (count($batch) >= PRODUCT_BATCH) {
-            $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
+            $db->transaction(fn() => $db->upsertMany('cpa_network_awin_products', $batch));
             $batch = [];
         }
     }
     if ($batch) {
-        $db->transaction(fn() => $db->upsertMany('awin_products', $batch));
+        $db->transaction(fn() => $db->upsertMany('cpa_network_awin_products', $batch));
     }
     fclose($fh);
     return [$n, $kept];
 }
 
-/** Maps one feed row (Awin or Google format) to an awin_products row. */
+/** Maps one feed row (Awin or Google format) to an cpa_network_awin_products row. */
 function productRow(int $pid, string $fid, array $p): ?array
 {
     global $runStart;

@@ -1,7 +1,7 @@
 -- AWIN export schema (MariaDB 10.2+). awin_cron.php runs this on every start; all statements are idempotent.
 -- Every table keeps the full API record in `raw` (JSON); the other columns are extracted for querying.
 
-CREATE TABLE IF NOT EXISTS awin_accounts (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_accounts (
     account_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
     account_name    VARCHAR(255) NULL,
     account_type    VARCHAR(20)  NULL,
@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS awin_accounts (
     synced_at       DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_programmes (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_programmes (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     advertiser_id   BIGINT UNSIGNED NOT NULL,
     relationship    VARCHAR(20)  NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS awin_programmes (
     KEY idx_relationship (publisher_id, relationship)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_programme_details (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_programme_details (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     advertiser_id   BIGINT UNSIGNED NOT NULL,
     raw             JSON NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS awin_programme_details (
     PRIMARY KEY (publisher_id, advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_commission_groups (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_commission_groups (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     advertiser_id   BIGINT UNSIGNED NOT NULL,
     group_key       VARCHAR(100) NOT NULL,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS awin_commission_groups (
     PRIMARY KEY (publisher_id, advertiser_id, group_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_promotions (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_promotions (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     promotion_id    BIGINT UNSIGNED NOT NULL,
     advertiser_id   BIGINT UNSIGNED NULL,
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS awin_promotions (
     KEY idx_advertiser (advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_transactions (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_transactions (
     transaction_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
     publisher_id        BIGINT UNSIGNED NOT NULL,
     advertiser_id       BIGINT UNSIGNED NULL,
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS awin_transactions (
 
 -- Advertiser, creative and campaign performance reports, one row per report line per day.
 -- Rows for (publisher, report_type, region, report_date) are replaced on every fetch.
-CREATE TABLE IF NOT EXISTS awin_report_rows (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_report_rows (
     id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     publisher_id    BIGINT UNSIGNED NOT NULL,
     report_type     VARCHAR(20) NOT NULL,          -- advertiser | creative | campaign
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS awin_report_rows (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
 -- Feeds from the feed list with a membership in product_feed_membership (default: active). `raw` holds the feed list row without its URL (the URL contains the datafeed key).
-CREATE TABLE IF NOT EXISTS awin_feeds (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_feeds (
     publisher_id      BIGINT UNSIGNED NOT NULL,
     feed_id           VARCHAR(20)  NOT NULL,       -- numeric for Awin-format feeds, "F123" for Google-format feeds
     advertiser_id     BIGINT UNSIGNED NULL,
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS awin_feeds (
     vertical          VARCHAR(100) NULL,
     awin_imported_at  DATETIME     NULL,           -- "Last Imported": when AWIN last refreshed the feed
     product_count     INT UNSIGNED NULL,
-    imported_version  DATETIME     NULL,           -- awin_imported_at of the version now in awin_products (NULL = not imported)
+    imported_version  DATETIME     NULL,           -- awin_imported_at of the version now in cpa_network_awin_products (NULL = not imported)
     imported_filter   CHAR(32)     NULL,           -- hash of the product_categories filter used (NULL = all categories)
     imported_rows     INT UNSIGNED NULL,           -- products saved (after the category filter)
     imported_at       DATETIME     NULL,
@@ -133,10 +133,10 @@ CREATE TABLE IF NOT EXISTS awin_feeds (
     KEY idx_advertiser (advertiser_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-ALTER TABLE awin_feeds ADD COLUMN IF NOT EXISTS imported_filter CHAR(32) NULL AFTER imported_version;
+ALTER TABLE cpa_network_awin_feeds ADD COLUMN IF NOT EXISTS imported_filter CHAR(32) NULL AFTER imported_version;
 
 -- Products from the imported feeds. A feed's rows are replaced when AWIN publishes a new version of it.
-CREATE TABLE IF NOT EXISTS awin_products (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_products (
     publisher_id        BIGINT UNSIGNED NOT NULL,
     feed_id             VARCHAR(20)  NOT NULL,
     product_key         VARCHAR(100) NOT NULL,     -- aw_product_id (Awin format) or id (Google format)
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS awin_products (
     KEY idx_ean (ean)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
 
-CREATE TABLE IF NOT EXISTS awin_sync_state (
+CREATE TABLE IF NOT EXISTS cpa_network_awin_sync_state (
     publisher_id    BIGINT UNSIGNED NOT NULL,
     part            VARCHAR(30) NOT NULL,
     last_run_at     DATETIME NOT NULL,
